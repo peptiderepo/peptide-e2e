@@ -1,0 +1,83 @@
+# smoke.yml
+#
+# Playwright smoke tests against staging.peptiderepo.com
+#
+# Triggers:
+#   - Manually via workflow_dispatch (run before any prod deploy)
+#   - Called by other repos via workflow_call (deploy gates)
+#
+# Secrets required (set in GitHub repo Settings → Secrets → Actions):
+#   STAGING_WP_ADMIN_USER     — WordPress admin username on staging
+#   STAGING_WP_ADMIN_PASSWORD — WordPress admin password on staging
+
+name: Smoke Tests (Staging)
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Target URL (defaults to staging)'
+        required: false
+        default: 'https://staging.peptiderepo.com'
+
+  # Allow other repos to call this workflow as a deploy gate
+  workflow_call:
+    inputs:
+      base_url:
+        type: string
+        required: false
+        default: 'https://staging.peptiderepo.com'
+    secrets:
+      STAGING_WP_ADMIN_USER:
+        required: true
+      STAGING_WP_ADMIN_PASSWORD:
+        required: true
+
+jobs:
+  smoke:
+    name: Playwright smoke suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install dependencies
+        working-directory: e2e
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: e2e
+        run: npx playwright install chromium --with-deps
+
+      - name: Run smoke tests
+        working-directory: e2e
+        env:
+          BASE_URL: ${{ inputs.base_url || 'https://staging.peptiderepo.com' }}
+          WP_ADMIN_USER: ${{ secrets.STAGING_WP_ADMIN_USER }}
+          WP_ADMIN_PASSWORD: ${{ secrets.STAGING_WP_ADMIN_PASSWORD }}
+        run: npx playwright test
+
+      - name: Upload test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: e2e/playwright-report/
+          retention-days: 14
+
+      - name: Upload failure screenshots/videos
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-failures
+          path: e2e/test-results/
+          retention-days: 7
