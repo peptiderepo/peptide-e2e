@@ -1,14 +1,7 @@
-# smoke.yml
+# smoke.yml — Playwright smoke tests against staging.peptiderepo.com
 #
-# Playwright smoke tests against staging.peptiderepo.com
-#
-# Triggers:
-#   - Manually via workflow_dispatch (run before any prod deploy)
-#   - Called by other repos via workflow_call (deploy gates)
-#
-# Secrets required (set in GitHub repo Settings -> Secrets -> Actions):
-#   STAGING_WP_ADMIN_USER     -- WordPress admin username on staging
-#   STAGING_WP_ADMIN_PASSWORD -- WordPress admin password on staging
+# Called by other repos via workflow_call as a deploy gate.
+# Secrets required: STAGING_WP_ADMIN_USER, STAGING_WP_ADMIN_PASSWORD
 
 name: Smoke Tests (Staging)
 
@@ -16,17 +9,16 @@ on:
   workflow_dispatch:
     inputs:
       base_url:
-        description: "Target URL (defaults to staging)"
+        description: 'Target URL (defaults to staging)'
         required: false
-        default: "https://staging.peptiderepo.com"
+        default: 'https://staging.peptiderepo.com'
 
-  # Allow other repos to call this workflow as a deploy gate
   workflow_call:
     inputs:
       base_url:
         type: string
         required: false
-        default: "https://staging.peptiderepo.com"
+        default: 'https://staging.peptiderepo.com'
     secrets:
       STAGING_WP_ADMIN_USER:
         required: true
@@ -46,8 +38,8 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
-          cache: "npm"
+          node-version: '22'
+          cache: 'npm'
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
@@ -58,7 +50,7 @@ jobs:
 
       - name: Run smoke tests
         env:
-          BASE_URL: ${{ inputs.base_url || "https://staging.peptiderepo.com" }}
+          BASE_URL: ${{ inputs.base_url }}
           WP_ADMIN_USER: ${{ secrets.STAGING_WP_ADMIN_USER }}
           WP_ADMIN_PASSWORD: ${{ secrets.STAGING_WP_ADMIN_PASSWORD }}
         run: npx playwright test
