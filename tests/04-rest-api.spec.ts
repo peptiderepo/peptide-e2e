@@ -59,4 +59,11 @@ test.describe('REST API — PR Core (CPT registration)', () => {
     // Instead we verify the CPT exists via the WP REST types endpoint.
     const res = await request.get('/wp-json/wp/v2/types/peptide');
     // 200 = CPT registered; 404 = CPT missing entirely — both are informative
-   
+       expect([200, 404]).toContain(res.status());
+    if (res.status() === 200) {
+      const body = await res.json();
+      // Types endpoint returns a single type object with slug
+      expect(body).toHaveProperty('slug', 'peptide');
+    }
+  });
+});
