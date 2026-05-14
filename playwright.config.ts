@@ -43,9 +43,14 @@ export default defineConfig({
   },
 
   projects: [
-    // Auth setup — runs first, saves session to disk
+    // Auth setup — runs first, saves session to disk.
+    // testDir override: global.setup.ts lives at repo root, not under ./tests.
+    // Without this, the top-level testDir './tests' filters it out and the
+    // setup project silently runs 0 tests, leaving the storage-state file
+    // unwritten and every chromium-project test failing on storageState load.
     {
       name: 'setup',
+      testDir: '.',
       testMatch: /global\.setup\.ts/,
     },
     // All smoke tests — depend on auth setup
