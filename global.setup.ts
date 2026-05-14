@@ -33,8 +33,18 @@ setup('authenticate as WP admin', async ({ page }) => {
   await page.fill('#user_pass', password);
   await page.click('#wp-submit');
 
-  // Wait for successful redirect to wp-admin dashboard
-  await expect(page).toHaveURL(/wp-admin/, { timeout: 20_000 });
+  // Wait for any post-login navigation. The site may redirect successful logins
+  // to the homepage (via a login_redirect filter) rather than to wp-admin —
+  // staging does this. So we don't assert the post-submit URL; instead, we
+  // verify we're no longer ON wp-login.php (which would indicate a credential
+  // rejection or 2FA prompt) and then navigate explicitly to wp-admin.
+  await page.waitForURL((url) => !url.pathname.includes('/wp-login.php'), {
+    timeout: 20_000,
+  });
+
+  // Navigate explicitly into wp-admin to capture the authenticated admin session.
+  await page.goto('/wp-admin/');
+  await expect(page).toHaveURL(/\/wp-admin\//, { timeout: 20_000 });
   await expect(page.locator('#wpadminbar')).toBeVisible();
 
   // Persist session cookies + localStorage to disk
