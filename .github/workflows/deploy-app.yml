@@ -79,7 +79,10 @@ jobs:
 
   deploy-production:
     name: Deploy to Production
-    needs: [deploy-staging]
+    # Smoke is now a GATE: a smoke FAILURE blocks production. A deliberately
+    # skipped smoke (run_smoke: false) still allows prod via the if-condition.
+    needs: [deploy-staging, smoke]
+    if: ${{ !cancelled() && needs.deploy-staging.result == 'success' && needs.smoke.result != 'failure' }}
     runs-on: ubuntu-latest
     environment: production
     steps:
