@@ -100,8 +100,8 @@ test.describe('WP Admin — Peptide Repo Core admin', () => {
     // PR Core registers the peptide CPT which creates a "Peptides" menu item
     const nav = page.locator('#adminmenu');
     await expect(nav).toBeVisible();
-    // "Peptides" top-level menu item is registered by the peptide CPT
-    await expect(nav.locator('text=Peptides')).toBeVisible({ timeout: 10_000 });
+    // PR Core registers the peptide CPT, which adds a post_type=peptide admin menu/submenu (label-agnostic).
+    await expect(nav.locator('a[href*="post_type=peptide"]').first()).toBeAttached({ timeout: 10_000 });
   });
 
   test('PR Core Settings page loads', async ({ page }) => {
