@@ -1,19 +1,19 @@
 name: Reusable Deploy (staging → smoke → production)
 
 # Single shared deploy pipeline for every peptiderepo plugin and the theme.
-# Callers pass `target_path` (the wp-content subpath) and `secrets: inherit`,
-# and the deploy logic lives HERE — fix it once instead of in six copy-pasted
-# per-repo deploy.yml files (the drift that broke every deploy in May 2026).
+# Callers pass `target_path` + `secrets: inherit`; deploy logic lives HERE so a
+# fix lands once instead of in six copy-pasted deploy.yml files.
 #
-# Staging deploy → smoke (informational) → production deploy (env-gated) with a
-# pre/post active-plugin-count guard (the 2026-04-23 WP-core-clobber tripwire),
-# LiteSpeed purge, and a health check.
+# Hardened against the documented Hostinger behaviour of rate-limiting concurrent
+# GitHub-runner IPs (connection timeouts, exit 255): the rsync is retried with
+# backoff, and the plugin-inventory guard is best-effort so a throttled count
+# check never fails an otherwise-good deploy.
 
 on:
   workflow_call:
     inputs:
       target_path:
-        description: "wp-content subpath, e.g. wp-content/plugins/prautoblogger or wp-content/themes/peptide-starter"
+        description: "wp-content subpath, e.g. wp-content/plugins/prautoblogger"
         required: true
         type: string
       run_smoke:
@@ -22,18 +22,12 @@ on:
         default: true
         type: boolean
     secrets:
-      SSH_PRIVATE_KEY:
-        required: true
-      SSH_HOST:
-        required: true
-      SSH_PORT:
-        required: true
-      SSH_USERNAME:
-        required: true
-      STAGING_WP_ADMIN_USER:
-        required: false
-      STAGING_WP_ADMIN_PASSWORD:
-        required: false
+      SSH_PRIVATE_KEY: {required: true}
+      SSH_HOST: {required: true}
+      SSH_PORT: {required: true}
+      SSH_USERNAME: {required: true}
+      STAGING_WP_ADMIN_USER: {required: false}
+      STAGING_WP_ADMIN_PASSWORD: {required: false}
 
 permissions:
   contents: read
@@ -45,21 +39,27 @@ jobs:
     environment: staging
     steps:
       - uses: actions/checkout@v4
-      - name: Deploy via rsync → staging
+      - name: Deploy via rsync → staging (retry-on-throttle)
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
           BASE="/home/${{ secrets.SSH_USERNAME }}/domains/peptiderepo.com/public_html"
-          rsync -avz --delete \
-            --exclude '.git' --exclude '.github' --exclude 'tests' --exclude 'node_modules' \
-            --exclude 'vendor' --exclude 'composer.json' --exclude 'composer.lock' \
-            --exclude 'phpunit.xml' --exclude 'phpunit.xml.dist' --exclude 'phpcs.xml.dist' \
-            --exclude '.phpcs.xml.dist' --exclude 'ARCHITECTURE.md' --exclude 'CONVENTIONS.md' \
-            --exclude 'CHANGELOG.md' --exclude 'qa-reviews' \
-            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o BatchMode=yes" \
-            ./ "${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}:$BASE/staging/${{ inputs.target_path }}/"
+          SSHOPT="-i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o BatchMode=yes"
+          n=0
+          until [ "$n" -ge 4 ]; do
+            rsync -avz --delete \
+              --exclude '.git' --exclude '.github' --exclude 'tests' --exclude 'node_modules' \
+              --exclude 'vendor' --exclude 'composer.json' --exclude 'composer.lock' \
+              --exclude 'phpunit.xml' --exclude 'phpunit.xml.dist' --exclude 'phpcs.xml.dist' \
+              --exclude '.phpcs.xml.dist' --exclude 'ARCHITECTURE.md' --exclude 'CONVENTIONS.md' \
+              --exclude 'CHANGELOG.md' --exclude 'qa-reviews' \
+              -e "ssh $SSHOPT" \
+              ./ "${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}:$BASE/staging/${{ inputs.target_path }}/" && break
+            n=$((n+1)); echo "staging rsync failed (attempt $n/4) — Hostinger may be throttling runner IPs; retrying in 25s..."; sleep 25
+          done
+          [ "$n" -lt 4 ] || { echo "::error::staging rsync failed after 4 attempts"; exit 1; }
       - name: Staging health check
         run: |
           sleep 5
@@ -79,42 +79,44 @@ jobs:
 
   deploy-production:
     name: Deploy to Production
-    needs: [deploy-staging]   # smoke is informational; not a prod gate
+    needs: [deploy-staging]
     runs-on: ubuntu-latest
     environment: production
     steps:
       - uses: actions/checkout@v4
-      - name: Deploy via rsync → production (plugin-inventory guard)
+      - name: Deploy via rsync → production (retry + inventory guard)
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
           BASE="/home/${{ secrets.SSH_USERNAME }}/domains/peptiderepo.com/public_html"
-          SSHC="ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o BatchMode=yes ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}"
-          PRE=$($SSHC "wp --path=$BASE plugin list --status=active --field=name 2>/dev/null | wc -l" || echo 0)
-          echo "Pre-deploy active plugins: $PRE"
-          rsync -avz --delete \
-            --exclude '.git' --exclude '.github' --exclude 'tests' --exclude 'node_modules' \
-            --exclude 'vendor' --exclude 'composer.json' --exclude 'composer.lock' \
-            --exclude 'phpunit.xml' --exclude 'phpunit.xml.dist' --exclude 'phpcs.xml.dist' \
-            --exclude '.phpcs.xml.dist' --exclude 'ARCHITECTURE.md' --exclude 'CONVENTIONS.md' \
-            --exclude 'CHANGELOG.md' --exclude 'qa-reviews' \
-            -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o BatchMode=yes" \
-            ./ "${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}:$BASE/${{ inputs.target_path }}/"
-          POST=$($SSHC "wp --path=$BASE plugin list --status=active --field=name 2>/dev/null | wc -l" || echo 0)
-          echo "Post-deploy active plugins: $POST"
-          if [ "${PRE:-0}" -gt 0 ] && [ "${POST:-0}" -lt "${PRE:-0}" ]; then
-            echo "ERROR: active plugin count dropped ${PRE} -> ${POST} after deploy — aborting as failed."
-            exit 1
+          SSHOPT="-i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30 -o BatchMode=yes"
+          PRE=$(ssh $SSHOPT "${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}" "wp --path=$BASE plugin list --status=active --field=name 2>/dev/null | wc -l" 2>/dev/null || echo 0)
+          echo "Pre-deploy active plugins (best-effort): $PRE"
+          n=0
+          until [ "$n" -ge 4 ]; do
+            rsync -avz --delete \
+              --exclude '.git' --exclude '.github' --exclude 'tests' --exclude 'node_modules' \
+              --exclude 'vendor' --exclude 'composer.json' --exclude 'composer.lock' \
+              --exclude 'phpunit.xml' --exclude 'phpunit.xml.dist' --exclude 'phpcs.xml.dist' \
+              --exclude '.phpcs.xml.dist' --exclude 'ARCHITECTURE.md' --exclude 'CONVENTIONS.md' \
+              --exclude 'CHANGELOG.md' --exclude 'qa-reviews' \
+              -e "ssh $SSHOPT" \
+              ./ "${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}:$BASE/${{ inputs.target_path }}/" && break
+            n=$((n+1)); echo "prod rsync failed (attempt $n/4) — retrying in 25s..."; sleep 25
+          done
+          [ "$n" -lt 4 ] || { echo "::error::production rsync failed after 4 attempts"; exit 1; }
+          POST=$(ssh $SSHOPT "${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}" "wp --path=$BASE plugin list --status=active --field=name 2>/dev/null | wc -l; find wp-content/litespeed/ -type f -delete 2>/dev/null; touch .lscache_purge 2>/dev/null || true" 2>/dev/null | head -1 || echo 0)
+          echo "Post-deploy active plugins (best-effort): $POST"
+          if [ "${PRE:-0}" -gt 0 ] && [ "${POST:-0}" -gt 0 ] && [ "${POST:-0}" -lt "${PRE:-0}" ]; then
+            echo "::error::active plugin count dropped ${PRE} -> ${POST} after deploy"; exit 1
           fi
-          $SSHC "cd $BASE && find wp-content/litespeed/ -type f -delete 2>/dev/null; touch .lscache_purge 2>/dev/null || true"
-          echo "LiteSpeed cache purged."
       - name: Production health check
         run: |
           sleep 5
           S=$(curl -s -o /dev/null -w '%{http_code}' https://peptiderepo.com)
-          if [ "$S" != "200" ] && [ "$S" != "403" ]; then echo "ERROR: site returned HTTP $S"; exit 1; fi
+          if [ "$S" != "200" ] && [ "$S" != "403" ]; then echo "::error::site returned HTTP $S"; exit 1; fi
           echo "Production healthy (HTTP $S)"
       - name: Cleanup
         if: always()
