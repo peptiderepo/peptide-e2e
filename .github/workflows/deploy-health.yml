@@ -1,0 +1,70 @@
+name: Deploy Health Monitor
+
+# Daily drift + deploy-failure check across all peptiderepo app repos.
+# Runs on GitHub's scheduler (independent of the local board cron that died).
+# Opens ONE de-duplicated 'deploy-health' issue here when something is off.
+
+on:
+  schedule:
+    - cron: '0 13 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+jobs:
+  check:
+    name: Check prod-vs-main drift + last deploy status
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = 'peptiderepo';
+            const repos = [
+              'prautoblogger','peptide-repo-core','peptide-search-ai',
+              'peptide-news-plugin','peptide-reconstitution-calculator','peptide-starter-theme'
+            ];
+            const short = s => s ? String(s).substring(0,7) : '—';
+            const problems = [];
+            for (const repo of repos) {
+              try {
+                const main = (await github.rest.repos.getBranch({owner, repo, branch:'main'})).data.commit.sha;
+                let runConc = 'none', runSha = '';
+                try {
+                  const runs = (await github.rest.actions.listWorkflowRuns({owner, repo, workflow_id:'deploy.yml', per_page:1})).data.workflow_runs;
+                  if (runs.length) { runConc = runs[0].conclusion || runs[0].status; runSha = runs[0].head_sha; }
+                } catch (e) { runConc = 'no-deploy-workflow'; }
+                let prodSha = null, prodState = 'none';
+                const deps = (await github.rest.repos.listDeployments({owner, repo, environment:'production', per_page:1})).data;
+                if (deps.length) {
+                  prodSha = deps[0].sha;
+                  const sts = (await github.rest.repos.listDeploymentStatuses({owner, repo, deployment_id: deps[0].id, per_page:1})).data;
+                  if (sts.length) prodState = sts[0].state;
+                }
+                if (runConc === 'failure') problems.push(`**${repo}**: latest deploy run failed (\`${short(runSha)}\`)`);
+                if (prodSha && prodSha !== main) problems.push(`**${repo}**: prod behind main — prod=\`${short(prodSha)}\` vs main=\`${short(main)}\` (undeployed commits)`);
+                if (prodSha && prodState !== 'success') problems.push(`**${repo}**: last production deployment state is \`${prodState}\``);
+                core.info(`${repo}: main=${short(main)} lastRun=${runConc} prodDeploy=${short(prodSha)}/${prodState}`);
+              } catch (e) {
+                problems.push(`**${repo}**: monitor error — ${e.message}`);
+              }
+            }
+            const summary = problems.length
+              ? `### ⚠️ Deploy health: ${problems.length} issue(s)\n\n` + problems.map(p=>`- ${p}`).join('\n')
+              : `### ✅ All app repos current; last deploy healthy`;
+            await core.summary.addRaw(summary).write();
+            if (problems.length) {
+              const existing = (await github.rest.issues.listForRepo({owner, repo: context.repo.repo, labels:'deploy-health', state:'open'})).data;
+              if (existing.length === 0) {
+                await github.rest.issues.create({ owner, repo: context.repo.repo,
+                  title: `Deploy health: ${problems.length} issue(s) detected`,
+                  body: summary + `\n\n_Opened by deploy-health.yml. Close once resolved; the monitor won't reopen while this stays open._`,
+                  labels: ['deploy-health'] });
+                core.warning(`Opened deploy-health issue (${problems.length} problems)`);
+              } else {
+                core.warning(`${problems.length} problems; deploy-health issue already open (#${existing[0].number})`);
+              }
+            }
