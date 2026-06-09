@@ -45,7 +45,23 @@ jobs:
                   if (sts.length) prodState = sts[0].state;
                 }
                 if (runConc === 'failure') problems.push(`**${repo}**: latest deploy run failed (\`${short(runSha)}\`)`);
-                if (prodSha && prodSha !== main) problems.push(`**${repo}**: prod behind main — prod=\`${short(prodSha)}\` vs main=\`${short(main)}\` (undeployed commits)`);
+                if (prodSha && prodSha !== main) {
+                  // Only real drift if undeployed commits touch DEPLOYABLE files
+                  // (ignore .github/, tests/, and docs/build files the deploy excludes).
+                  try {
+                    const cmp = (await github.rest.repos.compareCommits({owner, repo, base: prodSha, head: main})).data;
+                    const deployable = (cmp.files || []).some(f => {
+                      const x = f.filename;
+                      if (x.startsWith('.github/') || x.startsWith('tests/')) return false;
+                      if (/^(ARCHITECTURE|CONVENTIONS|CHANGELOG|README)\.md$/.test(x)) return false;
+                      if (/^(composer\.(json|lock)|phpunit\.xml(\.dist)?|\.?phpcs\.xml\.dist)$/.test(x)) return false;
+                      return true;
+                    });
+                    if (deployable) problems.push(`**${repo}**: prod behind main — prod=\`${short(prodSha)}\` vs main=\`${short(main)}\` (undeployed code changes)`);
+                  } catch (e) {
+                    problems.push(`**${repo}**: prod sha != main sha (could not diff: ${e.message})`);
+                  }
+                }
                 if (prodSha && prodState !== 'success') problems.push(`**${repo}**: last production deployment state is \`${prodState}\``);
                 core.info(`${repo}: main=${short(main)} lastRun=${runConc} prodDeploy=${short(prodSha)}/${prodState}`);
               } catch (e) {
