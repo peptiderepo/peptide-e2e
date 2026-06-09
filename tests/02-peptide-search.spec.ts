@@ -25,14 +25,14 @@ test.describe('Peptide Search AI', () => {
   test('search input widget is present on page', async ({ page }) => {
     // PSA renders a form with class .psa-search-form or input with data-psa attr
     const searchInput = page.locator(
-      '.psa-search-form input, input[name*="peptide"], input[placeholder*="peptide" i], [data-psa] input'
+      '.hero-search .psa-search-input'
     ).first();
     await expect(searchInput).toBeVisible({ timeout: 10_000 });
   });
 
   test('searching for a known peptide returns results', async ({ page }) => {
     const searchInput = page.locator(
-      '.psa-search-form input, input[name*="peptide"], input[placeholder*="peptide" i], [data-psa] input'
+      '.hero-search .psa-search-input'
     ).first();
     await expect(searchInput).toBeVisible();
 
@@ -41,7 +41,7 @@ test.describe('Peptide Search AI', () => {
     await searchInput.press('Enter');
 
     // Results container should appear and contain something
-    const results = page.locator('.psa-results, .psa-search-results, [data-psa-results]').first();
+    const results = page.locator('.hero-search .psa-search-results').first();
     await expect(results).toBeVisible({ timeout: 15_000 });
     const text = await results.textContent();
     expect((text ?? '').trim().length).toBeGreaterThan(0);
@@ -57,7 +57,7 @@ test.describe('Peptide Search AI', () => {
     );
 
     const searchInput = page.locator(
-      '.psa-search-form input, input[name*="peptide"], input[placeholder*="peptide" i], [data-psa] input'
+      '.hero-search .psa-search-input'
     ).first();
     await searchInput.fill('TB-500');
     await searchInput.press('Enter');

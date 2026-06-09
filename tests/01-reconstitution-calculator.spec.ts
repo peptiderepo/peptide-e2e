@@ -39,31 +39,14 @@ test.describe('Reconstitution Calculator', () => {
     expect(options).toBeGreaterThan(1); // >1 means at least one peptide beyond placeholder
   });
 
-  test('fills inputs and gets a numeric result', async ({ page }) => {
-    // Select BPC-157 or the first non-placeholder option
-    const select = page.locator('select').first();
-    const firstPeptide = select.locator('option').nth(1);
-    const firstValue = await firstPeptide.getAttribute('value');
-    await select.selectOption(firstValue ?? '');
-
-    // Fill reconstitution volume (mL) — use a known valid value
-    const volInput = page.locator('input[name*="recon"], input[placeholder*="mL"], input[type="number"]').first();
-    await volInput.fill('2');
-
-    // Fill desired dose
-    const doseInput = page.locator('input[name*="dose"], input[placeholder*="dose"], input[type="number"]').nth(1);
-    await doseInput.fill('250');
-
-    // Trigger calculation (button or auto-calculate on input)
-    const calcButton = page.locator('button[type="submit"], button:has-text("Calculate")');
-    if (await calcButton.count() > 0) {
-      await calcButton.first().click();
-    }
-
-    // Results container should show a non-zero concentration or injection volume
-    const results = page.locator('.prc-results, .calculator-results, [data-prc-result]').first();
-    await expect(results).toBeVisible({ timeout: 5_000 });
-    const resultText = await results.textContent();
-    expect(resultText).toMatch(/\d+(\.\d+)?/); // contains at least one number
-  });
+	test('fills inputs and gets a numeric result', async ({ page }) => {
+		const calc = page.locator('.prc-calculator');
+		// The calculator auto-computes once a peptide preset is chosen (the preset
+		// supplies vial size, recommended water volume and a default dose).
+		await calc.locator('#prc-peptide-select').selectOption({ index: 1 });
+		// Results panel unhides and renders numeric result cards.
+		const results = page.locator('#prc-results');
+		await expect(results).toBeVisible({ timeout: 10_000 });
+		await expect(page.locator('.prc-result-card__value').first()).toHaveText(/\d/, { timeout: 5_000 });
+	});
 });

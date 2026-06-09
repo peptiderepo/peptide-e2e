@@ -97,7 +97,8 @@ test.describe('WP Admin — PRAutoBlogger settings page', () => {
 test.describe('WP Admin — Peptide Repo Core admin', () => {
   test('PR Core menu item exists in wp-admin', async ({ page }) => {
     await page.goto(`${ADMIN}/`);
-    // PR Core registers the peptide CPT which creates a "Peptides" menu item    const nav = page.locator('#adminmenu');
+    // PR Core registers the peptide CPT which creates a "Peptides" menu item
+    const nav = page.locator('#adminmenu');
     await expect(nav).toBeVisible();
     // "Peptides" top-level menu item is registered by the peptide CPT
     await expect(nav.locator('text=Peptides')).toBeVisible({ timeout: 10_000 });

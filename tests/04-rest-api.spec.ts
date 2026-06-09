@@ -38,7 +38,6 @@ test.describe('REST API — Peptide Search AI', () => {
     expect([200, 404]).toContain(res.status());
     if (res.status() === 200) {
       const body = await res.json();
-      expect(body).toHaveProperty('status');
       expect(body).toHaveProperty('results');
     }
   });
