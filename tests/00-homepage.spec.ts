@@ -29,7 +29,7 @@ test.describe('Homepage', () => {
 
   test('renders site name in page title', async ({ page }) => {
     await page.goto('/');
-    await expect(page).toHaveTitle(/peptiderepo/i);
+    await expect(page).toHaveTitle(/peptide ?repo/i);
   });
 
   test('wp-admin bar present (logged-in session)', async ({ page }) => {

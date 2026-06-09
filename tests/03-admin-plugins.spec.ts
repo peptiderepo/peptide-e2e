@@ -25,7 +25,7 @@ const REQUIRED_PLUGINS = [
   'peptide-search-ai',
   'peptide-repo-core',
   'peptide-reconstitution-calculator',
-  'pr-autoblogger',
+  'prautoblogger',
   'peptide-starter-theme', // theme, shown differently — checked separately
 ];
 

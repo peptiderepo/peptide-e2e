@@ -14,7 +14,7 @@
 
 import { test, expect } from '@playwright/test';
 
-const CALC_PATH = process.env.CALC_PAGE_PATH ?? '/reconstitution-calculator/';
+const CALC_PATH = process.env.CALC_PAGE_PATH ?? '/calculator/';
 
 test.describe('Reconstitution Calculator', () => {
   test.beforeEach(async ({ page }) => {
