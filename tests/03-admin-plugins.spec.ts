@@ -94,6 +94,44 @@ test.describe('WP Admin — PRAutoBlogger settings page', () => {
   });
 });
 
+test.describe('WP Admin — PRAutoBlogger board page', () => {
+  /**
+   * Smoke test: Board submenu page must load without 404 or "Invalid plugin page".
+   *
+   * This test guards against the v0.19.1 regression class: Board submenu was
+   * registered before the parent top-level menu page existed (both at admin_menu
+   * priority 10), causing WordPress to fall back to the `admin_page_*` hookname.
+   * At request time WP recomputed the hookname, found nothing, and called
+   * wp_die("Invalid plugin page"). The fix (v0.19.1) moves the board hook to
+   * priority 11 so the parent menu slot is populated first.
+   *
+   * Selector sourced from templates/admin/board-page.php: `<div id="prab-board" ...>`.
+   *
+   * NOTE: This test cannot be validated against prod until v0.19.1 is deployed.
+   * It is included in the deploy-gate smoke suite so the bug class becomes
+   * un-shippable in future. The spec compiles and lists cleanly; the test will
+   * run correctly once the fix is live.
+   */
+  test('board page loads and board container is present', async ({ page }) => {
+    // Navigate to the Board submenu page.
+    const res = await page.goto(`${ADMIN}/admin.php?page=prautoblogger-board`);
+
+    // Must be HTTP 200 — not wp_die 404.
+    expect(res?.status()).toBe(200);
+
+    // wp-admin chrome must render (confirms we're authenticated and in admin).
+    await expect(page.locator('#wpbody')).toBeVisible();
+
+    // Body must NOT contain the wp_die "Invalid plugin page" error string.
+    const body = await page.textContent('body');
+    expect(body).not.toContain('Invalid plugin page');
+
+    // Board container div must be present (from templates/admin/board-page.php).
+    // selector: <div id="prab-board" class="prab-board" ...>
+    await expect(page.locator('#prab-board')).toBeVisible({ timeout: 10_000 });
+  });
+});
+
 test.describe('WP Admin — Peptide Repo Core admin', () => {
   test('PR Core menu item exists in wp-admin', async ({ page }) => {
     await page.goto(`${ADMIN}/`);
