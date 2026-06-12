@@ -8,10 +8,25 @@
  * The saved auth state (playwright/.auth/admin.json) is reused by the
  * "chromium" project so individual tests don't each incur a login round-trip.
  *
- * Retry hardening (2026-06-12): Hostinger rate-limits GitHub runner IPs on
+ * Retry hardening (2026-06-12 v1): Hostinger rate-limits GitHub runner IPs on
  * wp-login.php, causing TimeoutError on page.goto. The login attempt is now
  * retried up to MAX_ATTEMPTS times with a fresh browser context per attempt
  * and BACKOFF_MS delay between attempts so transient throttle windows clear.
+ *
+ * Retry hardening (2026-06-12 v2 — ERR_ABORTED fix): When Hostinger aborts
+ * the connection (net::ERR_ABORTED), Playwright marks the context as closed
+ * internally. A subsequent context.close() call throws
+ * "browserContext.close: Target page, context or browser has been closed",
+ * which propagated out of the catch block and crashed setup without consuming
+ * remaining retries. Fix: context.close() is now guarded in its own
+ * try/catch so an already-closed context never aborts the retry loop.
+ * MAX_ATTEMPTS raised to 5; backoff doubled each time (5s/10s/20s/40s) so the
+ * LiteSpeed throttle window has time to clear before each retry.
+ *
+ * Timing math (job timeout-minutes: 15 = 900 s):
+ *   5 attempts × NAV_TIMEOUT (90 s) = 450 s navigation ceiling
+ *   4 inter-attempt waits (5+10+20+40 s) = 75 s backoff ceiling
+ *   Total worst-case: ~525 s — well under the 900 s job timeout.
  */
 
 import { test as setup, expect } from '@playwright/test';
@@ -20,9 +35,22 @@ import * as fs from 'fs';
 
 const AUTH_FILE = path.join(__dirname, 'playwright/.auth/admin.json');
 
-const MAX_ATTEMPTS = 3;
-const BACKOFF_MS   = 15_000;  // 15 s between attempts
-const NAV_TIMEOUT  = 90_000;  // raised from 30 s → 90 s per attempt
+const MAX_ATTEMPTS = 5;
+const NAV_TIMEOUT  = 90_000;  // 90 s per navigation attempt
+
+/** Exponential backoff delays (ms) between attempts: 5 s, 10 s, 20 s, 40 s */
+function backoffMs(attempt: number): number {
+  return 5_000 * Math.pow(2, attempt - 1);
+}
+
+/** Safely close a context that Playwright may have already closed internally. */
+async function safeClose(context: import('@playwright/test').BrowserContext): Promise<void> {
+  try {
+    await context.close();
+  } catch {
+    // Ignored: context was already closed (e.g. after ERR_ABORTED or crash).
+  }
+}
 
 setup('authenticate as WP admin', async ({ browser }) => {
   const user = process.env.WP_ADMIN_USER;
@@ -75,7 +103,7 @@ setup('authenticate as WP admin', async ({ browser }) => {
       await page.context().storageState({ path: AUTH_FILE });
 
       console.log(`[setup] Login succeeded on attempt ${attempt}/${MAX_ATTEMPTS}`);
-      await context.close();
+      await safeClose(context);
       return; // success — exit setup
     } catch (err) {
       lastError = err;
@@ -84,11 +112,20 @@ setup('authenticate as WP admin', async ({ browser }) => {
         `[setup] Login attempt ${attempt}/${MAX_ATTEMPTS} FAILED: ${message}`
       );
 
-      await context.close();
+      // IMPORTANT: use safeClose — if Playwright received ERR_ABORTED it marks
+      // the context closed internally, so a plain context.close() throws
+      // "Target page, context or browser has been closed". Without this guard
+      // that secondary throw propagated out of catch and killed setup before
+      // the remaining retries ran.
+      await safeClose(context);
 
       if (attempt < MAX_ATTEMPTS) {
-        console.log(`[setup] Waiting ${BACKOFF_MS / 1000}s before retry ...`);
-        await new Promise((resolve) => setTimeout(resolve, BACKOFF_MS));
+        const wait = backoffMs(attempt);
+        console.log(
+          `[setup] Waiting ${wait / 1000}s before retry ` +
+          `(LiteSpeed throttle cool-down — attempt ${attempt + 1}/${MAX_ATTEMPTS}) ...`
+        );
+        await new Promise((resolve) => setTimeout(resolve, wait));
       }
     }
   }
@@ -97,7 +134,8 @@ setup('authenticate as WP admin', async ({ browser }) => {
   throw new Error(
     `[setup] All ${MAX_ATTEMPTS} login attempts failed. ` +
     `Last error: ${lastError instanceof Error ? lastError.message : String(lastError)}\n` +
-    `Hint: Hostinger may still be throttling GitHub runner IPs. ` +
-    `Re-run the workflow once the throttle window clears, or increase BACKOFF_MS / MAX_ATTEMPTS.`
+    `Hypothesis: Hostinger LiteSpeed is throttling GitHub runner IPs on wp-login.php — ` +
+    `connections abort (ERR_ABORTED) or time out in bursts. ` +
+    `Re-run the workflow once the throttle window clears, or increase MAX_ATTEMPTS / backoffMs().`
   );
 });
