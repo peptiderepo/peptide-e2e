@@ -2,6 +2,19 @@
 
 All notable changes to the peptide-e2e smoke suite will be documented here.
 
+## [1.4.0] - 2026-06-12
+
+### Added
+- **Dossier edit + re-run smoke (M3, skip-if-absent)** (`05-dossier-edit.spec.ts`).
+  Opens a discovered post's dossier and exercises the v0.20.0 edit surface READ-ONLY:
+  opens/closes the first edit panel (asserts textareas, Save/Re-run buttons, the
+  fork-preserved + queued-execution copy), asserts every disabled edit affordance
+  carries a visible reason, and checks the M3 sidebar cards (Run Spend, Models &
+  Prompts). NEVER clicks Save or any Re-run button (those fork inputs / queue paid
+  LLM jobs). SKIPS with a loud annotation when `.prab-stage-rerun-footer` is absent
+  (plugin v0.20.0 not yet deployed) so this PR can merge before prautoblogger PR #161
+  per the M3 merge-order binding. 25 tests total (was 24), delta = 1.
+
 ## [1.3.0] - 2026-06-12
 
 ### Fixed
