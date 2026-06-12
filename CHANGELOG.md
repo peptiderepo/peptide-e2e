@@ -14,7 +14,7 @@ All notable changes to the peptide-e2e smoke suite will be documented here.
   Defensive strategy: tries canonical staging post IDs 925/930 first, then falls back to the
   most recent REST post, then falls back to post_id=0 (graceful empty state). Stage-section
   assertions are conditional on a run record existing. Loud test.info() annotations on fallback
-  paths. New in PRAutoBlogger v0.19.2.
+  paths. New in PRAutoBlogger v0.19.2 / v0.19.3.
 
 ## [1.1.0] - 2026-06-12
 
