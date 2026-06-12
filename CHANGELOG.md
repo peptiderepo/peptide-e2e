@@ -2,6 +2,20 @@
 
 All notable changes to the peptide-e2e smoke suite will be documented here.
 
+## [1.2.0] - 2026-06-12
+
+### Added
+- **Dossier page smoke test** (`03-admin-plugins.spec.ts` — `WP Admin — PRAutoBlogger Article Dossier`).
+  Navigates to `/wp-admin/admin.php?page=prautoblogger-dossier&post_id=<N>`, asserts HTTP 200,
+  `#prab-dossier` container visible, body does NOT contain "Invalid plugin page" or "Fatal error".
+  Guards against: menu-ordering regression (wrong hookname → wp_die 404), PHP fatals on dossier
+  load, missing dossier container, and stage-section regression.
+
+  Defensive strategy: tries canonical staging post IDs 925/930 first, then falls back to the
+  most recent REST post, then falls back to post_id=0 (graceful empty state). Stage-section
+  assertions are conditional on a run record existing. Loud test.info() annotations on fallback
+  paths. New in PRAutoBlogger v0.19.2 / v0.19.3.
+
 ## [1.1.0] - 2026-06-12
 
 ### Added
