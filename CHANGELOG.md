@@ -2,6 +2,26 @@
 
 All notable changes to the peptide-e2e smoke suite will be documented here.
 
+## [1.3.0] - 2026-06-12
+
+### Fixed
+- **Auth setup survives `ERR_ABORTED` on wp-login.php** (`global.setup.ts`).
+  When Hostinger's LiteSpeed throttles a GitHub runner IP, `page.goto` can
+  throw `net::ERR_ABORTED` rather than a `TimeoutError`. Playwright marks the
+  browser context closed internally on abort, so the existing
+  `context.close()` call in the catch block threw
+  `"browserContext.close: Target page, context or browser has been closed"`,
+  which propagated out of catch and killed setup before the remaining retries
+  ran. Two production deploys were blocked by this flake on 2026-06-12.
+
+  Fix: introduced `safeClose()` helper that swallows the already-closed
+  error, so an aborted context never terminates the retry loop. Max attempts
+  raised from 3 → 5; backoff is now exponential (5 s / 10 s / 20 s / 40 s)
+  instead of a flat 15 s, giving the throttle window more time to clear.
+  Worst-case timing: 5 × 90 s navigation + 75 s backoff = ~525 s, well under
+  the 900 s (15 min) job timeout. Final-failure message explicitly names the
+  LiteSpeed throttle hypothesis so future CI logs self-diagnose.
+
 ## [1.2.0] - 2026-06-12
 
 ### Added
